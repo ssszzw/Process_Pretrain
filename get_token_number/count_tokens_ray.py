@@ -5,6 +5,7 @@
 import gc
 import ray
 import json
+import random
 from pathlib import Path
 import time
 import socket
@@ -32,6 +33,7 @@ TEXT_COLUMN = "text"
 BATCH_SIZE = 1000  # 批处理大小
 NUM_WORKERS_PER_NODE = 10  # 每个节点的并行进程数
 EXCLUDE_IPS = []  # 需要排除的节点IP列表
+RANDOM_SEED = 42  # 随机种子，用于文件列表 shuffle
 
 
 def find_all_datasets_and_files(data_root: str) -> Dict[str, Dict[str, List[str]]]:
@@ -452,6 +454,11 @@ def main():
         for subsets in datasets.values():
             for files in subsets.values():
                 all_files.extend(files)
+        
+        # Shuffle 文件列表以均衡负载
+        random.seed(RANDOM_SEED)
+        random.shuffle(all_files)
+        logger.info(f"已对文件列表进行随机打乱 (seed={RANDOM_SEED})")
         
         logger.info(f"\n总计需要处理 {len(all_files)} 个文件")
         
