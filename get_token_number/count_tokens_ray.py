@@ -14,6 +14,8 @@ from multiprocessing import Pool
 from collections import defaultdict
 from typing import Dict, List
 from tqdm import tqdm
+from datetime import datetime
+
 
 # 导入工作函数模块
 from get_token_number.count_single_parquet import count_tokens_in_file
@@ -26,13 +28,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 配置参数
-DATA_ROOT = "/wl_intelligent/wangjinghui05/nvidia"
-TOKENIZER_PATH = "/path/to/your/tokenizer"  # 请修改为实际的 tokenizer 路径
-OUTPUT_JSON = "/wl_intelligent/shenzhiwei/token_statistics.json"
+DATA_ROOT = "/wl_intelligent/shenzhiwei/model_data/nvidia_distributed"
+TOKENIZER_PATH = "/share/zhangxiaojiang/project/swe/outputs/30B-A3B_insert_loss_verifiable_all_1021/checkpoint-519"  # 请修改为实际的 tokenizer 路径
+OUTPUT_JSON = "/share/shenzhiwei/env_package/ProcessPretrain_ds/get_token_number/token_statistics.json"
 TEXT_COLUMN = "text"
 BATCH_SIZE = 1000  # 批处理大小
 NUM_WORKERS_PER_NODE = 10  # 每个节点的并行进程数
-EXCLUDE_IPS = []  # 需要排除的节点IP列表
+EXCLUDE_IPS = ['10.48.90.208']  # 需要排除的节点IP列表
 RANDOM_SEED = 42  # 随机种子，用于文件列表 shuffle
 
 
