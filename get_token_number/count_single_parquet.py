@@ -6,7 +6,7 @@ import gc
 import pandas as pd
 from transformers import AutoTokenizer
 import logging
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Union
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -17,16 +17,21 @@ def count_tokens_in_file(args) -> Tuple[str, int, int, Optional[str]]:
     计算单个 parquet 文件中的 token 数量
     
     Args:
-        args: (file_path, tokenizer_path, text_column, batch_size, worker_id)
+        args: (file_path, tokenizer_path, text_columns, batch_size, worker_id)
+              text_columns 可以是字符串或列表，如果是列表则依次尝试查找
         
     Returns:
         (file_path, token_count, row_count, error_message)
         如果成功则 error_message 为 None
     """
-    file_path, tokenizer_path, text_column, batch_size, worker_id = args
+    file_path, tokenizer_path, text_columns, batch_size, worker_id = args
     
     # 为每个进程配置独立的 logger
     worker_logger = logging.getLogger(f"Worker-{worker_id}")
+    
+    # 标准化 text_columns 为列表
+    if isinstance(text_columns, str):
+        text_columns = [text_columns]
     
     try:
         # 加载 tokenizer（每个进程加载一次）
@@ -39,23 +44,28 @@ def count_tokens_in_file(args) -> Tuple[str, int, int, Optional[str]]:
         
         worker_logger.info(f"Processing: {file_path}")
         
-        # 读取 parquet 文件（只读取需要的列）
+        # 首先读取文件获取所有列信息
         try:
-            df = pd.read_parquet(file_path, columns=[text_column])
-        except Exception as read_error:
-            # 如果指定列失败，尝试读取所有列
-            worker_logger.warning(f"Failed to read column '{text_column}', trying all columns: {read_error}")
-            try:
-                df = pd.read_parquet(file_path)
-            except Exception as e:
-                error_msg = f"Failed to read file: {str(e)}"
-                worker_logger.error(f"{file_path}: {error_msg}")
-                gc.collect()
-                return file_path, 0, 0, error_msg
+            df = pd.read_parquet(file_path)
+        except Exception as e:
+            error_msg = f"Failed to read file: {str(e)}"
+            worker_logger.error(f"{file_path}: {error_msg}")
+            gc.collect()
+            return file_path, 0, 0, error_msg
         
-        if text_column not in df.columns:
-            available_cols = ', '.join(df.columns.tolist()[:5])
-            error_msg = f"Column '{text_column}' not found. Available columns: {available_cols}..."
+        # 依次尝试查找指定的列名
+        text_column = None
+        for col_name in text_columns:
+            if col_name in df.columns:
+                text_column = col_name
+                worker_logger.info(f"Found text column: '{text_column}'")
+                break
+        
+        # 如果没有找到任何指定的列
+        if text_column is None:
+            available_cols = ', '.join(df.columns.tolist())
+            tried_cols = ', '.join(text_columns)
+            error_msg = f"None of the specified columns [{tried_cols}] found. Available columns: {available_cols}..."
             worker_logger.error(f"{file_path}: {error_msg}")
             del df
             gc.collect()

@@ -12,7 +12,7 @@ import socket
 import logging
 from multiprocessing import Pool
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Union
 from tqdm import tqdm
 from datetime import datetime
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 DATA_ROOT = "/wl_intelligent/shenzhiwei/model_data/nvidia_distributed"
 TOKENIZER_PATH = "/share/zhangxiaojiang/project/swe/outputs/30B-A3B_insert_loss_verifiable_all_1021/checkpoint-519"  # 请修改为实际的 tokenizer 路径
 OUTPUT_JSON = "/share/shenzhiwei/env_package/ProcessPretrain_ds/get_token_number/token_statistics.json"
-TEXT_COLUMN = "text"
+TEXT_COLUMNS = ["text", "content"]  # 可配置的文本列名列表，按优先级依次查找
 BATCH_SIZE = 1000  # 批处理大小
 NUM_WORKERS_PER_NODE = 10  # 每个节点的并行进程数
 EXCLUDE_IPS = ['10.48.90.208']  # 需要排除的节点IP列表
@@ -106,14 +106,14 @@ def find_all_datasets_and_files(data_root: str) -> Dict[str, Dict[str, List[str]
 
 
 def count_tokens_on_node(file_list: List[str], tokenizer_path: str, 
-                         text_column: str, batch_size: int, num_workers: int) -> Dict:
+                         text_columns: Union[str, List[str]], batch_size: int, num_workers: int) -> Dict:
     """
     在单个节点上使用多进程计算 token 数量
     
     Args:
         file_list: 需要处理的文件列表
         tokenizer_path: tokenizer 路径
-        text_column: 文本列名
+        text_columns: 文本列名（可以是字符串或列表）
         batch_size: 批处理大小
         num_workers: 并行进程数
     
@@ -128,7 +128,7 @@ def count_tokens_on_node(file_list: List[str], tokenizer_path: str,
     
     # 准备参数列表
     args_list = [
-        (file_path, tokenizer_path, text_column, batch_size, i % num_workers)
+        (file_path, tokenizer_path, text_columns, batch_size, i % num_workers)
         for i, file_path in enumerate(file_list)
     ]
     
@@ -170,7 +170,7 @@ def count_tokens_on_node(file_list: List[str], tokenizer_path: str,
     
     if failed_files:
         node_logger.warning(f"失败的文件数: {len(failed_files)}")
-        for file_path, error in failed_files[:5]:  # 只显示前5个
+        for file_path, error in failed_files:  # 只显示前5个
             node_logger.warning(f"  - {Path(file_path).name}: {error}")
     
     return {
@@ -187,14 +187,14 @@ def count_tokens_on_node(file_list: List[str], tokenizer_path: str,
 
 @ray.remote
 def count_tokens_node_task(file_list: List[str], tokenizer_path: str, 
-                           text_column: str, batch_size: int, num_workers: int) -> Dict:
+                           text_columns: Union[str, List[str]], batch_size: int, num_workers: int) -> Dict:
     """
     Ray 远程任务：在节点上计算 token 数量
     
     Args:
         file_list: 分配给该节点的文件列表
         tokenizer_path: tokenizer 路径
-        text_column: 文本列名
+        text_columns: 文本列名（可以是字符串或列表）
         batch_size: 批处理大小
         num_workers: 每个节点的并行进程数
     
@@ -208,7 +208,7 @@ def count_tokens_node_task(file_list: List[str], tokenizer_path: str,
         result = count_tokens_on_node(
             file_list=file_list,
             tokenizer_path=tokenizer_path,
-            text_column=text_column,
+            text_columns=text_columns,
             batch_size=batch_size,
             num_workers=num_workers
         )
@@ -276,7 +276,7 @@ def split_files_to_nodes(all_files: List[str], all_nodes: List) -> List[List[str
 
 
 def submit_tasks_to_nodes(all_nodes: List, node_file_lists: List[List[str]], 
-                         tokenizer_path: str, text_column: str, 
+                         tokenizer_path: str, text_columns: Union[str, List[str]], 
                          batch_size: int, num_workers_per_node: int) -> List:
     """
     向所有节点提交处理任务
@@ -300,7 +300,7 @@ def submit_tasks_to_nodes(all_nodes: List, node_file_lists: List[List[str]],
         ).remote(
             file_list=file_list,
             tokenizer_path=tokenizer_path,
-            text_column=text_column,
+            text_columns=text_columns,
             batch_size=batch_size,
             num_workers=num_workers_per_node
         )
@@ -424,7 +424,7 @@ def main():
     logger.info(f"数据根目录: {DATA_ROOT}")
     logger.info(f"Tokenizer 路径: {TOKENIZER_PATH}")
     logger.info(f"输出文件: {OUTPUT_JSON}")
-    logger.info(f"文本列名: {TEXT_COLUMN}")
+    logger.info(f"文本列名: {TEXT_COLUMNS}")
     logger.info(f"批处理大小: {BATCH_SIZE}")
     logger.info(f"每节点进程数: {NUM_WORKERS_PER_NODE}")
     logger.info("=" * 80)
@@ -480,7 +480,7 @@ def main():
             all_nodes=all_nodes,
             node_file_lists=node_file_lists,
             tokenizer_path=TOKENIZER_PATH,
-            text_column=TEXT_COLUMN,
+            text_columns=TEXT_COLUMNS,
             batch_size=BATCH_SIZE,
             num_workers_per_node=NUM_WORKERS_PER_NODE
         )
@@ -505,7 +505,7 @@ def main():
         organized_results['metadata'] = {
             'data_root': DATA_ROOT,
             'tokenizer_path': TOKENIZER_PATH,
-            'text_column': TEXT_COLUMN,
+            'text_columns': TEXT_COLUMNS,
             'batch_size': BATCH_SIZE,
             'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
             'processing_time_seconds': time.time() - start_time,

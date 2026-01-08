@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 import socket
 import logging
+import shutil
 from multiprocessing import Pool
 from functools import partial
 from tqdm import tqdm
@@ -32,25 +33,72 @@ EXCLUDE_IPS = []  # 需要排除的节点IP列表
 
 
 def find_all_parquet_files(source_dir, random_seed=42):
-    """递归查找所有 parquet 文件"""
+    """递归查找所有 parquet 文件和 README.md 文件"""
     import random
     
     parquet_files = []
+    readme_files = []
     source_path = Path(source_dir)
     
     logger.info(f"正在扫描目录: {source_dir}")
     
-    for file_path in source_path.rglob("*.parquet"):
-        parquet_files.append(str(file_path))
+    for file_path in source_path.rglob("*"):
+        if file_path.is_file():
+            if file_path.suffix == ".parquet":
+                parquet_files.append(str(file_path))
+            elif file_path.name == "README.md":
+                readme_files.append(str(file_path))
     
     logger.info(f"找到 {len(parquet_files)} 个 parquet 文件")
+    logger.info(f"找到 {len(readme_files)} 个 README.md 文件")
     
     # Shuffle 文件列表（使用随机种子保证可重复性）
     random.seed(random_seed)
     random.shuffle(parquet_files)
     logger.info(f"已对文件列表进行随机打乱 (seed={random_seed})")
     
-    return parquet_files
+    return parquet_files, readme_files
+
+
+def copy_readme_files(readme_files, source_dir, target_dir):
+    """
+    复制所有 README.md 文件到对应的目标目录位置
+    
+    Args:
+        readme_files: README.md 文件列表
+        source_dir: 源目录
+        target_dir: 目标目录
+    """
+    logger.info(f"\n开始复制 {len(readme_files)} 个 README.md 文件...")
+    
+    source_path = Path(source_dir)
+    target_path = Path(target_dir)
+    
+    success_count = 0
+    failed_count = 0
+    
+    for readme_file in tqdm(readme_files, desc="复制 README.md"):
+        try:
+            # 计算相对路径
+            readme_path = Path(readme_file)
+            relative_path = readme_path.relative_to(source_path)
+            
+            # 计算目标路径
+            target_file = target_path / relative_path
+            
+            # 创建目标目录
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 复制文件
+            shutil.copy2(readme_file, target_file)
+            success_count += 1
+            
+        except Exception as e:
+            logger.error(f"复制 README.md 失败: {readme_file}, 错误: {str(e)}")
+            failed_count += 1
+    
+    logger.info(f"README.md 文件复制完成: 成功 {success_count}, 失败 {failed_count}")
+
 
 
 def process_files_on_node(file_list, source_dir, target_dir, sample_ratio, random_seed, num_workers):
@@ -350,10 +398,16 @@ def main():
         
         # 查找所有需要处理的文件
         logger.info("\n开始扫描文件...")
-        all_files = find_all_parquet_files(SOURCE_DIR, RANDOM_SEED)
+        all_files, readme_files = find_all_parquet_files(SOURCE_DIR, RANDOM_SEED)
         if not all_files:
             logger.warning("没有找到任何 parquet 文件")
             return
+        
+        # 复制所有 README.md 文件
+        if readme_files:
+            copy_readme_files(readme_files, SOURCE_DIR, TARGET_DIR)
+        else:
+            logger.info("没有找到 README.md 文件")
         
         # 分配文件到各个节点
         logger.info("\n分配文件到各个节点...")
