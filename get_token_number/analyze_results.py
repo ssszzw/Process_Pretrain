@@ -134,7 +134,7 @@ def print_dataset_details(results: Dict, sort_by: str = 'tokens', top_n: Optiona
         print()
 
 
-def generate_distribution_chart(results: Dict, top_n: int = 15):
+def generate_distribution_chart(results: Dict, top_n: int = 30):
     """生成分布图（文本版）"""
     print("=" * 100)
     print(f"TOP {top_n} 数据集（按 Token 数量）")
@@ -172,6 +172,76 @@ def generate_distribution_chart(results: Dict, top_n: int = 15):
         
         print(f"{i:2}. {display_name:<35} {bar} {format_number(tokens):>8} ({percentage:5.1f}%)")
     
+    print()
+
+
+def generate_subset_distribution_chart(results: Dict, top_n: int = 50):
+    """
+    生成子集分布图（文本版）
+    展示所有子集的 token 量分布
+    
+    Args:
+        results: 统计结果字典
+        top_n: 显示前 N 个子集（默认 50）
+    """
+    print("=" * 100)
+    print(f"TOP {top_n} 子集（按 Token 数量）")
+    print("=" * 100)
+    print()
+    
+    datasets = results.get('datasets', {})
+    
+    # 收集所有子集信息
+    all_subsets = []
+    for dataset_name, dataset_stats in datasets.items():
+        subsets = dataset_stats.get('subsets', {})
+        for subset_name, subset_stats in subsets.items():
+            all_subsets.append({
+                'dataset': dataset_name,
+                'subset': subset_name,
+                'tokens': subset_stats['token_count'],
+                'rows': subset_stats['row_count'],
+                'files': subset_stats['file_count'],
+                'failed': subset_stats['failed_files']
+            })
+    
+    if not all_subsets:
+        print("没有子集数据")
+        return
+    
+    # 按 token 数量排序
+    sorted_subsets = sorted(all_subsets, key=lambda x: x['tokens'], reverse=True)[:top_n]
+    
+    # 找出最大值用于归一化
+    max_tokens = sorted_subsets[0]['tokens']
+    
+    # 打印条形图
+    bar_width = 50
+    for i, subset_info in enumerate(sorted_subsets, 1):
+        tokens = subset_info['tokens']
+        bar_length = int((tokens / max_tokens) * bar_width) if max_tokens > 0 else 0
+        bar = "█" * bar_length
+        
+        # 构建显示名称: dataset/subset
+        full_name = f"{subset_info['dataset']}/{subset_info['subset']}"
+        display_name = full_name[:40]  # 截断名称
+        
+        # 计算占比
+        percentage = (tokens / results['total_tokens'] * 100) if results['total_tokens'] > 0 else 0
+        
+        # 显示信息
+        print(f"{i:3}. {display_name:<40} {bar} {format_number(tokens):>8} ({percentage:5.2f}%)")
+    
+    print()
+    
+    # 打印统计信息
+    print(f"子集总数: {len(all_subsets)}")
+    print(f"显示数量: {len(sorted_subsets)}")
+    
+    # 计算前 N 个子集的总占比
+    top_n_tokens = sum(s['tokens'] for s in sorted_subsets)
+    top_n_percentage = (top_n_tokens / results['total_tokens'] * 100) if results['total_tokens'] > 0 else 0
+    print(f"前 {len(sorted_subsets)} 个子集占总 Token 数: {top_n_percentage:.2f}%")
     print()
 
 
@@ -275,8 +345,11 @@ def main():
     # 打印数据集详情
     print_dataset_details(results, sort_by=sort_by, top_n=top_n)
     
-    # 打印分布图
-    generate_distribution_chart(results, top_n=15)
+    # 打印数据集分布图
+    generate_distribution_chart(results, top_n=20)
+    
+    # 打印子集分布图
+    generate_subset_distribution_chart(results, top_n=50)
     
     # 导出 CSV（如果指定）
     if csv_output:
