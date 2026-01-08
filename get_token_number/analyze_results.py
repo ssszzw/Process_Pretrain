@@ -224,7 +224,7 @@ def generate_subset_distribution_chart(results: Dict, top_n: int = 50):
         
         # 构建显示名称: dataset/subset
         full_name = f"{subset_info['dataset']}/{subset_info['subset']}"
-        display_name = full_name[:40]  # 截断名称
+        display_name = full_name[:60]  # 截断名称
         
         # 计算占比
         percentage = (tokens / results['total_tokens'] * 100) if results['total_tokens'] > 0 else 0
