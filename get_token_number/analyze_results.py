@@ -230,7 +230,7 @@ def generate_subset_distribution_chart(results: Dict, top_n: int = 50):
         percentage = (tokens / results['total_tokens'] * 100) if results['total_tokens'] > 0 else 0
         
         # 显示信息
-        print(f"{i:3}. {display_name:<40} {bar} {format_number(tokens):>8} ({percentage:5.2f}%)")
+        print(f"{i:3}. {display_name:<60} {bar} {format_number(tokens):>8} ({percentage:5.2f}%)")
     
     print()
     
