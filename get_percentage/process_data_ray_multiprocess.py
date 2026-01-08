@@ -29,7 +29,7 @@ TARGET_DIR = "/wl_intelligent/shenzhiwei/model_data/nvidia_distributed"
 SAMPLE_RATIO = 0.05  # 5%
 RANDOM_SEED = 42
 NUM_WORKERS_PER_NODE = 10  # 每个节点的并行进程数
-EXCLUDE_IPS = []  # 需要排除的节点IP列表
+EXCLUDE_IPS = ['10.48.90.208']  # 需要排除的节点IP列表
 
 
 def find_all_parquet_files(source_dir, random_seed=42):
