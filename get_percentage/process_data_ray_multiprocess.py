@@ -1,6 +1,7 @@
 """
 使用 Ray 分布式框架在多个节点上并行处理数据
 每个节点内部使用多进程处理分配给它的数据文件
+支持格式: .parquet, .jsonl.zst
 """
 import ray
 import json
@@ -33,7 +34,7 @@ EXCLUDE_IPS = ['10.48.90.208']  # 需要排除的节点IP列表
 
 
 def find_all_parquet_files(source_dir, random_seed=42):
-    """递归查找所有 parquet 文件和 README.md 文件"""
+    """递归查找所有 parquet 文件、.jsonl.zst 文件和 README.md 文件"""
     import random
     
     parquet_files = []
@@ -46,10 +47,12 @@ def find_all_parquet_files(source_dir, random_seed=42):
         if file_path.is_file():
             if file_path.suffix == ".parquet":
                 parquet_files.append(str(file_path))
+            elif file_path.suffix == ".zst" and file_path.name.endswith('.jsonl.zst'):
+                parquet_files.append(str(file_path))
             elif file_path.name == "README.md":
                 readme_files.append(str(file_path))
     
-    logger.info(f"找到 {len(parquet_files)} 个 parquet 文件")
+    logger.info(f"找到 {len(parquet_files)} 个数据文件 (parquet + jsonl.zst)")
     logger.info(f"找到 {len(readme_files)} 个 README.md 文件")
     
     # Shuffle 文件列表（使用随机种子保证可重复性）
@@ -400,7 +403,7 @@ def main():
         logger.info("\n开始扫描文件...")
         all_files, readme_files = find_all_parquet_files(SOURCE_DIR, RANDOM_SEED)
         if not all_files:
-            logger.warning("没有找到任何 parquet 文件")
+            logger.warning("没有找到任何数据文件 (parquet 或 jsonl.zst)")
             return
         
         # 复制所有 README.md 文件
