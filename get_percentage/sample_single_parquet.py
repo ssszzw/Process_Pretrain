@@ -178,7 +178,7 @@ def process_single_file(args):
         source_path_str = str(relative_path)
         if source_path_str.endswith('.jsonl.zst'):
             # .jsonl.zst 转换为 .parquet
-            target_path_str = source_path_str[:-11] + '.parquet'
+            target_path_str = source_path_str[:-10] + '.parquet'
             is_jsonl_zst = True
         elif source_path_str.endswith('.parquet'):
             # .parquet 保持不变
