@@ -387,9 +387,14 @@ def main():
     Path(TARGET_DIR).mkdir(parents=True, exist_ok=True)
     logger.info(f"目标目录已创建: {TARGET_DIR}")
     
-    # 初始化 Ray
+    # 初始化 Ray（指定运行时环境，自动安装依赖）
     logger.info("\n连接到 Ray 集群...")
-    ray.init(address="auto")
+    ray.init(
+        address="auto",
+        runtime_env={
+            "pip": ["zstandard"]  # 自动在所有节点安装 zstandard
+        }
+    )
     logger.info("Ray 连接成功!")
     
     try:
