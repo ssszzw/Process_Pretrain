@@ -14,6 +14,94 @@ def load_results(json_file: str) -> Dict:
         return json.load(f)
 
 
+def merge_results(results_list: list[Dict]) -> Dict:
+    """
+    合并多个结果文件
+    
+    Args:
+        results_list: 结果字典列表
+        
+    Returns:
+        合并后的结果字典
+    """
+    if not results_list:
+        return {}
+    
+    if len(results_list) == 1:
+        return results_list[0]
+    
+    # 初始化合并结果
+    merged = {
+        'total_tokens': 0,
+        'total_rows': 0,
+        'total_files': 0,
+        'failed_files': 0,
+        'datasets': {},
+        'metadata': {
+            'merged_from': [],
+            'num_source_files': len(results_list)
+        }
+    }
+    
+    # 合并每个结果文件
+    for idx, results in enumerate(results_list, 1):
+        # 累加总体统计
+        merged['total_tokens'] += results.get('total_tokens', 0)
+        merged['total_rows'] += results.get('total_rows', 0)
+        merged['total_files'] += results.get('total_files', 0)
+        merged['failed_files'] += results.get('failed_files', 0)
+        
+        # 记录源文件信息
+        if 'metadata' in results:
+            source_info = {
+                'source_index': idx,
+                'data_root': results['metadata'].get('data_root', 'N/A'),
+                'timestamp': results['metadata'].get('timestamp', 'N/A'),
+                'tokens': results.get('total_tokens', 0),
+                'rows': results.get('total_rows', 0)
+            }
+            merged['metadata']['merged_from'].append(source_info)
+        
+        # 合并数据集信息
+        datasets = results.get('datasets', {})
+        for dataset_name, dataset_stats in datasets.items():
+            if dataset_name not in merged['datasets']:
+                # 新数据集,直接添加
+                merged['datasets'][dataset_name] = {
+                    'total_tokens': dataset_stats['total_tokens'],
+                    'total_rows': dataset_stats['total_rows'],
+                    'total_files': dataset_stats['total_files'],
+                    'failed_files': dataset_stats['failed_files'],
+                    'subsets': {}
+                }
+            else:
+                # 已存在的数据集,累加统计
+                merged['datasets'][dataset_name]['total_tokens'] += dataset_stats['total_tokens']
+                merged['datasets'][dataset_name]['total_rows'] += dataset_stats['total_rows']
+                merged['datasets'][dataset_name]['total_files'] += dataset_stats['total_files']
+                merged['datasets'][dataset_name]['failed_files'] += dataset_stats['failed_files']
+            
+            # 合并子集信息
+            subsets = dataset_stats.get('subsets', {})
+            for subset_name, subset_stats in subsets.items():
+                if subset_name not in merged['datasets'][dataset_name]['subsets']:
+                    # 新子集,直接添加
+                    merged['datasets'][dataset_name]['subsets'][subset_name] = {
+                        'token_count': subset_stats['token_count'],
+                        'row_count': subset_stats['row_count'],
+                        'file_count': subset_stats['file_count'],
+                        'failed_files': subset_stats['failed_files']
+                    }
+                else:
+                    # 已存在的子集,累加统计
+                    merged['datasets'][dataset_name]['subsets'][subset_name]['token_count'] += subset_stats['token_count']
+                    merged['datasets'][dataset_name]['subsets'][subset_name]['row_count'] += subset_stats['row_count']
+                    merged['datasets'][dataset_name]['subsets'][subset_name]['file_count'] += subset_stats['file_count']
+                    merged['datasets'][dataset_name]['subsets'][subset_name]['failed_files'] += subset_stats['failed_files']
+    
+    return merged
+
+
 def format_number(num: int) -> str:
     """格式化大数字"""
     if num >= 1_000_000_000_000:  # T
@@ -50,19 +138,37 @@ def print_summary(results: Dict):
     # 元数据
     if 'metadata' in results:
         meta = results['metadata']
-        print("处理信息:")
-        print(f"  数据根目录:         {meta.get('data_root', 'N/A')}")
-        print(f"  Tokenizer:          {meta.get('tokenizer_path', 'N/A')}")
-        print(f"  处理时间:           {meta.get('timestamp', 'N/A')}")
-        print(f"  耗时:               {meta.get('processing_time_seconds', 0):.2f} 秒")
-        print(f"  节点数:             {meta.get('num_nodes', 'N/A')}")
-        print(f"  每节点进程数:       {meta.get('num_workers_per_node', 'N/A')}")
         
-        # 计算处理速度
-        if meta.get('processing_time_seconds', 0) > 0:
-            tokens_per_sec = results['total_tokens'] / meta['processing_time_seconds']
-            print(f"  处理速度:           {format_number(int(tokens_per_sec))}/秒")
-        print()
+        # 检查是否是合并的结果
+        if 'num_source_files' in meta:
+            print("合并信息:")
+            print(f"  合并源文件数:       {meta['num_source_files']}")
+            print()
+            
+            # 显示各源文件信息
+            if 'merged_from' in meta and meta['merged_from']:
+                print("源文件详情:")
+                for source in meta['merged_from']:
+                    print(f"    [{source['source_index']}] {source.get('data_root', 'N/A')}")
+                    print(f"        Tokens: {format_number(source['tokens'])}")
+                    print(f"        Rows:   {format_number(source['rows'])}")
+                    print(f"        时间:   {source.get('timestamp', 'N/A')}")
+                print()
+        else:
+            # 单个文件的元数据
+            print("处理信息:")
+            print(f"  数据根目录:         {meta.get('data_root', 'N/A')}")
+            print(f"  Tokenizer:          {meta.get('tokenizer_path', 'N/A')}")
+            print(f"  处理时间:           {meta.get('timestamp', 'N/A')}")
+            print(f"  耗时:               {meta.get('processing_time_seconds', 0):.2f} 秒")
+            print(f"  节点数:             {meta.get('num_nodes', 'N/A')}")
+            print(f"  每节点进程数:       {meta.get('num_workers_per_node', 'N/A')}")
+            
+            # 计算处理速度
+            if meta.get('processing_time_seconds', 0) > 0:
+                tokens_per_sec = results['total_tokens'] / meta['processing_time_seconds']
+                print(f"  处理速度:           {format_number(int(tokens_per_sec))}/秒")
+            print()
 
 
 def print_dataset_details(results: Dict, sort_by: str = 'tokens', top_n: Optional[int] = None):
@@ -287,7 +393,7 @@ def export_to_csv(results: Dict, output_csv: str):
 def print_usage():
     """打印使用说明"""
     print("使用方法:")
-    print("  python analyze_results.py <results.json> [options]")
+    print("  python analyze_results.py <results.json> [<results2.json> ...] [options]")
     print()
     print("选项:")
     print("  --csv <output.csv>     导出为 CSV 格式")
@@ -295,8 +401,16 @@ def print_usage():
     print("  --sort [tokens|name]   排序方式（默认按 tokens）")
     print()
     print("示例:")
+    print("  # 分析单个文件")
     print("  python analyze_results.py token_statistics.json")
+    print()
+    print("  # 合并多个文件分析")
+    print("  python analyze_results.py results1.json results2.json results3.json")
+    print()
+    print("  # 导出为 CSV")
     print("  python analyze_results.py token_statistics.json --csv output.csv")
+    print()
+    print("  # 只显示前 10 个数据集")
     print("  python analyze_results.py token_statistics.json --top 10")
 
 
@@ -306,38 +420,60 @@ def main():
         print_usage()
         sys.exit(1)
     
-    json_file = sys.argv[1]
-    
-    # 检查文件是否存在
-    if not Path(json_file).exists():
-        print(f"错误: 文件不存在: {json_file}")
-        sys.exit(1)
-    
-    # 解析参数
+    # 收集所有 JSON 文件路径和选项参数
+    json_files = []
     sort_by = 'tokens'
     top_n = None
     csv_output = None
     
-    i = 2
+    i = 1
     while i < len(sys.argv):
-        if sys.argv[i] == '--csv' and i + 1 < len(sys.argv):
+        arg = sys.argv[i]
+        
+        if arg == '--csv' and i + 1 < len(sys.argv):
             csv_output = sys.argv[i + 1]
             i += 2
-        elif sys.argv[i] == '--top' and i + 1 < len(sys.argv):
+        elif arg == '--top' and i + 1 < len(sys.argv):
             top_n = int(sys.argv[i + 1])
             i += 2
-        elif sys.argv[i] == '--sort' and i + 1 < len(sys.argv):
+        elif arg == '--sort' and i + 1 < len(sys.argv):
             sort_by = sys.argv[i + 1]
             i += 2
-        else:
-            print(f"未知选项: {sys.argv[i]}")
+        elif arg.startswith('--'):
+            print(f"未知选项: {arg}")
             print_usage()
             sys.exit(1)
+        else:
+            # 当作 JSON 文件路径
+            json_files.append(arg)
+            i += 1
     
-    # 加载结果
-    print(f"加载结果: {json_file}")
+    # 检查是否至少有一个 JSON 文件
+    if not json_files:
+        print("错误: 至少需要指定一个 JSON 文件")
+        print_usage()
+        sys.exit(1)
+    
+    # 检查所有文件是否存在
+    for json_file in json_files:
+        if not Path(json_file).exists():
+            print(f"错误: 文件不存在: {json_file}")
+            sys.exit(1)
+    
+    # 加载所有结果文件
+    print(f"加载 {len(json_files)} 个结果文件:")
+    results_list = []
+    for json_file in json_files:
+        print(f"  - {json_file}")
+        results_list.append(load_results(json_file))
     print()
-    results = load_results(json_file)
+    
+    # 合并结果
+    if len(json_files) > 1:
+        print(f"正在合并 {len(json_files)} 个结果文件...")
+        print()
+    
+    results = merge_results(results_list)
     
     # 打印摘要
     print_summary(results)
