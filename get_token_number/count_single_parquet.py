@@ -96,7 +96,7 @@ def count_tokens_in_file(args) -> Tuple[str, int, int, Optional[str]]:
                 tokens = tokenizer(
                     texts,
                     truncation=False,
-                    add_special_tokens=True,
+                    add_special_tokens=False,
                     return_attention_mask=False,
                     return_token_type_ids=False
                 )
