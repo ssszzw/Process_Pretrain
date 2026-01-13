@@ -110,3 +110,26 @@ PRETRAINING_DATASET_RATIOS = {
     "wiki": 0.006,
 }
 
+# ==================== 采样策略配置 ====================
+# 采样策略类型常量
+SAMPLING_STRATEGY_PREDEFINED_RATIO = "predefined_ratio"      # 按照预定义的比例 (PRETRAINING_DATASET_RATIOS)
+SAMPLING_STRATEGY_TOKEN_PROPORTION = "token_proportion"      # 按照采样token量占总token量的比例
+# 未来可以添加更多策略，例如:
+# SAMPLING_STRATEGY_CUSTOM = "custom"                        # 自定义采样策略
+
+# 所有可用的采样策略列表
+AVAILABLE_SAMPLING_STRATEGIES = [
+    SAMPLING_STRATEGY_PREDEFINED_RATIO,
+    SAMPLING_STRATEGY_TOKEN_PROPORTION,
+]
+
+# 当前启用的采样策略（可以同时启用多个策略）
+# 示例:
+#   - 只使用预定义比例: [SAMPLING_STRATEGY_PREDEFINED_RATIO]
+#   - 只使用token比例: [SAMPLING_STRATEGY_TOKEN_PROPORTION]
+#   - 同时使用两种策略: [SAMPLING_STRATEGY_PREDEFINED_RATIO, SAMPLING_STRATEGY_TOKEN_PROPORTION]
+ENABLED_SAMPLING_STRATEGIES = [
+    SAMPLING_STRATEGY_PREDEFINED_RATIO,
+    # SAMPLING_STRATEGY_TOKEN_PROPORTION,  # 取消注释以启用token比例采样
+]
+

@@ -29,7 +29,10 @@ from utils.pretrain_ds_config import (
     PRETRAINING_DATASETS, 
     DATASET_PREFIX,
     total_size_in_TB,
-    PRETRAINING_DATASET_RATIOS
+    PRETRAINING_DATASET_RATIOS,
+    ENABLED_SAMPLING_STRATEGIES,
+    SAMPLING_STRATEGY_PREDEFINED_RATIO,
+    SAMPLING_STRATEGY_TOKEN_PROPORTION
 )
 
 # 导入工作函数模块
@@ -50,28 +53,62 @@ EXCLUDE_IPS = []  # 需要排除的节点IP列表
 # ============================================
 
 
-def calculate_target_tokens():
+def calculate_target_tokens(sampling_strategy, all_dataset_info=None):
     """
-    根据 total_size_in_TB 和 PRETRAINING_DATASET_RATIOS 计算每个数据集需要的token量
+    根据采样策略计算每个数据集需要的token量
+    
+    Args:
+        sampling_strategy: 采样策略类型
+        all_dataset_info: 所有数据集的实际信息 (仅token_proportion策略需要)
     
     Returns:
         dict: {dataset_name: target_tokens}
     """
-    tokens_per_tb = 250_000_000_000  # 250B tokens per TB
+    tokens_per_tb = 1_000_000_000_000  # 1T tokens per TB
     total_target_tokens = total_size_in_TB * tokens_per_tb
     
+    # 根据策略计算每个数据集的比例
+    if sampling_strategy == SAMPLING_STRATEGY_PREDEFINED_RATIO:
+        # 策略1: 使用预定义比例
+        ratios = PRETRAINING_DATASET_RATIOS
+        logger.info("=" * 80)
+        logger.info("目标采样量计算 - 预定义比例策略")
+        logger.info("=" * 80)
+        
+    elif sampling_strategy == SAMPLING_STRATEGY_TOKEN_PROPORTION:
+        # 策略2: 根据实际token量占比计算比例
+        if all_dataset_info is None:
+            logger.error("token_proportion策略需要提供all_dataset_info参数")
+            return {}
+        
+        total_actual_tokens = sum(info['total_tokens'] for info in all_dataset_info.values())
+        if total_actual_tokens == 0:
+            logger.error("所有数据集的总token量为0")
+            return {}
+        
+        # 计算每个数据集的实际占比
+        ratios = {}
+        for dataset_name, dataset_info in all_dataset_info.items():
+            ratios[dataset_name] = dataset_info['total_tokens'] / total_actual_tokens
+        
+        logger.info("=" * 80)
+        logger.info("目标采样量计算 - Token量比例策略")
+        logger.info("=" * 80)
+        logger.info(f"所有数据集总token量: {total_actual_tokens:,}")
+    else:
+        logger.error(f"未知的采样策略: {sampling_strategy}")
+        return {}
+    
+    # 使用统一的比例计算目标token量
     target_tokens = {}
-    for dataset_name, ratio in PRETRAINING_DATASET_RATIOS.items():
+    for dataset_name, ratio in ratios.items():
         target_tokens[dataset_name] = int(total_target_tokens * ratio)
     
-    logger.info("=" * 80)
-    logger.info("目标采样量计算")
-    logger.info("=" * 80)
     logger.info(f"目标总量: {total_size_in_TB} TB = {total_target_tokens:,} tokens")
-    logger.info(f"总量: {total_target_tokens / 1e9:.2f}B tokens")
+    logger.info(f"总量: {total_target_tokens / 1e12:.2f}T tokens")
     logger.info("\n各数据集目标token量:")
     for dataset_name, tokens in target_tokens.items():
-        logger.info(f"  {dataset_name}: {tokens:,} tokens ({tokens/1e9:.2f}B, {PRETRAINING_DATASET_RATIOS[dataset_name]*100:.1f}%)")
+        logger.info(f"  {dataset_name}: {tokens:,} tokens ({tokens/1e12:.2f}T, {ratios[dataset_name]*100:.1f}%)")
     logger.info("=" * 80)
     
     return target_tokens
@@ -138,9 +175,15 @@ def get_dataset_actual_tokens(dataset_name, paths):
     return dataset_info
 
 
-def prepare_sampling_tasks(dataset_name, target_tokens, dataset_info):
+def prepare_sampling_tasks(dataset_name, target_tokens, dataset_info, sampling_strategy):
     """
     准备采样任务列表
+    
+    Args:
+        dataset_name: 数据集名称
+        target_tokens: 目标token量
+        dataset_info: 数据集信息
+        sampling_strategy: 采样策略类型 (仅用于输出路径)
     
     Returns:
         list: [(parquet_path, target_tokens, output_path, file_seed), ...]
@@ -148,10 +191,10 @@ def prepare_sampling_tasks(dataset_name, target_tokens, dataset_info):
     actual_tokens = dataset_info['total_tokens']
     
     if actual_tokens == 0:
-        logger.warning("  ⚠️  警告: 数据集实际token量为0，无法采样")
+        logger.warning("  ⚠️  警告: 数据集实际token量为0,无法采样")
         return []
     
-    # 计算采样比例
+    # 计算采样比例 (统一逻辑)
     sampling_ratio = min(target_tokens / actual_tokens, 1.0)
     
     logger.info(f"  实际token量: {actual_tokens:,}")
@@ -188,12 +231,13 @@ def prepare_sampling_tasks(dataset_name, target_tokens, dataset_info):
                     if relative_folder is None:
                         relative_folder = folder_path_obj.name
                     
-                    # 输出路径
-                    output_folder = Path(OUTPUT_DIR) / relative_folder
+                    # 输出路径(包含策略名称的子目录)
+                    output_folder = Path(OUTPUT_DIR) / sampling_strategy / relative_folder
                     output_file = output_folder / filename
                     
                     # 文件种子
                     file_seed = RANDOM_SEED + file_counter
+                    file_seed = RANDOM_SEED
                     file_counter += 1
                     
                     tasks.append((
@@ -463,6 +507,7 @@ def main():
     logger.info(f"  输出目录: {OUTPUT_DIR}")
     logger.info(f"  目标数据量: {total_size_in_TB} TB")
     logger.info(f"  每节点进程数: {NUM_WORKERS_PER_NODE}")
+    logger.info(f"  启用的采样策略: {ENABLED_SAMPLING_STRATEGIES}")
     logger.info("=" * 80)
     
     # 检查输出目录配置
@@ -492,67 +537,105 @@ def main():
             logger.error("没有可用的节点!")
             return
         
-        # 1. 计算目标token量
-        target_tokens_dict = calculate_target_tokens()
-        
-        # 2. 对每个数据集进行采样
-        for dataset_name, target_tokens in target_tokens_dict.items():
-            if dataset_name not in PRETRAINING_DATASETS:
-                logger.warning(f"\n⚠️  警告: 数据集 {dataset_name} 在 PRETRAINING_DATASETS 中未定义，跳过")
-                continue
+        # 对每个采样策略进行处理
+        for strategy_idx, sampling_strategy in enumerate(ENABLED_SAMPLING_STRATEGIES):
+            logger.info("\n" + "#" * 80)
+            logger.info(f"执行采样策略 [{strategy_idx + 1}/{len(ENABLED_SAMPLING_STRATEGIES)}]: {sampling_strategy}")
+            logger.info("#" * 80)
             
-            paths = PRETRAINING_DATASETS[dataset_name]
+            # 1. 如果是token_proportion策略,先扫描所有数据集计算实际占比
+            all_dataset_info = {}
+            if sampling_strategy == SAMPLING_STRATEGY_TOKEN_PROPORTION:
+                logger.info("\n预扫描所有数据集以计算实际token量...")
+                
+                for dataset_name in PRETRAINING_DATASET_RATIOS.keys():
+                    if dataset_name not in PRETRAINING_DATASETS:
+                        continue
+                    
+                    paths = PRETRAINING_DATASETS[dataset_name]
+                    logger.info(f"  扫描数据集: {dataset_name}")
+                    dataset_info = get_dataset_actual_tokens(dataset_name, paths)
+                    all_dataset_info[dataset_name] = dataset_info
+                    logger.info(f"    实际token量: {dataset_info['total_tokens']:,}")
             
-            logger.info(f"\n{'='*80}")
-            logger.info(f"处理数据集: {dataset_name}")
-            logger.info(f"{'='*80}")
-            
-            # 2.1 获取数据集实际token量和文件信息
-            logger.info("  扫描数据集...")
-            dataset_info = get_dataset_actual_tokens(dataset_name, paths)
-            
-            # 2.2 准备采样任务
-            logger.info("  准备采样任务...")
-            sampling_tasks = prepare_sampling_tasks(dataset_name, target_tokens, dataset_info)
-            
-            if not sampling_tasks:
-                logger.warning(f"  没有需要采样的文件，跳过")
-                continue
-            
-            # 2.3 Shuffle任务以均衡负载
-            random.seed(RANDOM_SEED)
-            random.shuffle(sampling_tasks)
-            logger.info(f"  已对任务列表进行随机打乱")
-            
-            # 2.4 分配任务到各个节点
-            logger.info("  分配任务到各个节点...")
-            node_task_lists = split_tasks_to_nodes(sampling_tasks, all_nodes)
-            
-            # 2.5 提交任务到所有节点
-            logger.info("  提交任务到所有节点...")
-            ray_tasks = submit_tasks_to_nodes(
-                all_nodes=all_nodes,
-                node_task_lists=node_task_lists,
-                num_workers_per_node=NUM_WORKERS_PER_NODE
+            # 2. 根据策略计算每个数据集的目标token量
+            target_tokens_dict = calculate_target_tokens(
+                sampling_strategy=sampling_strategy,
+                all_dataset_info=all_dataset_info if all_dataset_info else None
             )
             
-            # 2.6 等待所有任务完成
-            logger.info(f"  等待 {len(ray_tasks)} 个节点任务完成...")
-            import time
-            start_time = time.time()
-            results = ray.get(ray_tasks)
-            elapsed_time = time.time() - start_time
+            if not target_tokens_dict:
+                logger.error(f"策略 {sampling_strategy} 计算目标token量失败,跳过")
+                continue
             
-            # 2.7 汇总结果
-            aggregate_results(results, dataset_name, target_tokens, output_path)
+            # 3. 对每个数据集进行采样
+            for dataset_name, target_tokens in target_tokens_dict.items():
+                if dataset_name not in PRETRAINING_DATASETS:
+                    logger.warning(f"\n⚠️  警告: 数据集 {dataset_name} 在 PRETRAINING_DATASETS 中未定义，跳过")
+                    continue
+                
+                paths = PRETRAINING_DATASETS[dataset_name]
+                
+                logger.info(f"\n{'='*80}")
+                logger.info(f"处理数据集: {dataset_name} (策略: {sampling_strategy})")
+                logger.info(f"{'='*80}")
+                
+                # 3.1 获取数据集信息(如果已缓存则使用缓存)
+                if dataset_name in all_dataset_info:
+                    dataset_info = all_dataset_info[dataset_name]
+                    logger.info("  使用缓存的数据集信息")
+                else:
+                    logger.info("  扫描数据集...")
+                    dataset_info = get_dataset_actual_tokens(dataset_name, paths)
+                
+                # 3.2 准备采样任务
+                logger.info("  准备采样任务...")
+                sampling_tasks = prepare_sampling_tasks(
+                    dataset_name=dataset_name,
+                    target_tokens=target_tokens,
+                    dataset_info=dataset_info,
+                    sampling_strategy=sampling_strategy
+                )
             
-            logger.info(f"  数据集 {dataset_name} 处理耗时: {elapsed_time:.2f} 秒")
-            
-            # 释放内存
-            del sampling_tasks
-            del node_task_lists
-            del results
-            gc.collect()
+                if not sampling_tasks:
+                    logger.warning(f"  没有需要采样的文件，跳过")
+                    continue
+                
+                # 3.3 Shuffle任务以均衡负载
+                random.seed(RANDOM_SEED)
+                random.shuffle(sampling_tasks)
+                logger.info(f"  已对任务列表进行随机打乱")
+                
+                # 3.4 分配任务到各个节点
+                logger.info("  分配任务到各个节点...")
+                node_task_lists = split_tasks_to_nodes(sampling_tasks, all_nodes)
+                
+                # 3.5 提交任务到所有节点
+                logger.info("  提交任务到所有节点...")
+                ray_tasks = submit_tasks_to_nodes(
+                    all_nodes=all_nodes,
+                    node_task_lists=node_task_lists,
+                    num_workers_per_node=NUM_WORKERS_PER_NODE
+                )
+                
+                # 3.6 等待所有任务完成
+                logger.info(f"  等待 {len(ray_tasks)} 个节点任务完成...")
+                import time
+                start_time = time.time()
+                results = ray.get(ray_tasks)
+                elapsed_time = time.time() - start_time
+                
+                # 3.7 汇总结果(输出路径包含策略名称)
+                strategy_output_path = output_path / sampling_strategy
+                aggregate_results(results, dataset_name, target_tokens, strategy_output_path)
+                
+                logger.info(f"  数据集 {dataset_name} 处理耗时: {elapsed_time:.2f} 秒")
+                
+                # 释放内存
+                del sampling_tasks
+                del node_task_lists
+                del results
+                gc.collect()
         
         logger.info("\n" + "=" * 80)
         logger.info("所有数据集采样完成!")
